@@ -1,0 +1,82 @@
+blueprint:
+  name: Notify on freezing weather
+  description: Checks the daily forecast to alert of freezing temperatures
+  domain: automation
+
+  input:
+    trigger_time:
+      name: Daily time to check
+      description: For example, 09:00:00
+      selector:
+        time:
+    weather_sensor:
+      name: Weather sensor
+      description: Service to query for weather forecasts (weather.*)
+      selector:
+        entity:
+          filter:
+            - domain: weather
+    notify_device:
+      name: Notification device
+      description: The device that will receieve alerts (notify.*)
+      selector:
+        device:
+          multiple: false
+          integration: mobile_app
+    templow_threshold:
+      name: Low temperature threshold
+      description: Degrees in Fahrenheit below which is considered freezing
+      default: 37
+      selector:
+        number:
+         unit_of_measurement: "°F" 
+
+variables:
+  trigger_time: !input trigger_time
+  weather_sensor: !input weather_sensor
+  notify_device: !input notify_device
+  templow_threshold: !input templow_threshold
+
+triggers:
+  - trigger: time
+    at: !input trigger_time
+conditions: []
+actions:
+  - action: weather.get_forecasts
+    metadata: {}
+    target:
+      entity_id: !input weather_sensor
+    data:
+      type: daily
+    response_variable: forecast
+  - if:
+      - condition: template
+        value_template: >-
+          {% set data = forecast[forecast | first] %}
+
+          {% set templow_list = data.forecast | map(attribute='templow') |
+          map('float') | select('lt', templow_threshold ) | list %}
+
+          {{ templow_list | length > 0 }}
+    then:
+      - alias: "Send a notification: Weather changed"
+        data:
+          data:
+            title: Incoming cold weather
+            notification_icon: mdi:snowflake-thermometer
+            color: "#6666FF"
+            actions:
+              - action: URI
+                title: View forecast
+                uri: "entityId:{{weather_sensor}}"
+          message: >-
+            {% set numDays = (forecast[forecast | first]).forecast |
+            map(attribute='templow') | map('float') | select('lt',
+            templow_threshold) | list | length %}{{numDays}} days of forecasted
+            freezing
+        action: "notify.mobile_app_{{ device_attr(notify_device, 'name') | slugify }}"
+        enabled: true
+      - variables:
+          days_below_templow: null
+    enabled: true
+mode: single
